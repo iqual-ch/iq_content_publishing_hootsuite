@@ -1,0 +1,36 @@
+iq_content_publishing_hootsuite.credentials.hootsuite:
+  type: mapping
+  label: 'Hootsuite credentials'
+  mapping:
+    client_id:
+      type: string
+      label: 'OAuth2 Client ID'
+    client_secret:
+      type: string
+      label: 'OAuth2 Client Secret'
+    access_token:
+      type: string
+      label: 'OAuth2 Access Token'
+    refresh_token:
+      type: string
+      label: 'OAuth2 Refresh Token'
+    token_expires:
+      type: integer
+      label: 'Token expiry timestamp'
+
+iq_content_publishing_hootsuite.settings.hootsuite:
+  type: mapping
+  label: 'Hootsuite platform settings'
+  mapping:
+    social_profile_ids:
+      type: sequence
+      label: 'Social Profile IDs to publish to'
+      sequence:
+        type: string
+        label: 'Social Profile ID'
+    send_now:
+      type: boolean
+      label: 'Publish immediately (instead of scheduling)'
+    scheduled_delay_minutes:
+      type: integer
+      label: 'Delay in minutes before scheduled publish'

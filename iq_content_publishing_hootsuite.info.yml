@@ -1,0 +1,7 @@
+name: 'Content Publishing: Hootsuite'
+type: module
+description: 'Provides Hootsuite integration for the Content Publishing framework. Enables publishing Drupal content to social media platforms via the Hootsuite API.'
+package: 'Content Publishing'
+core_version_requirement: ^11
+dependencies:
+  - iq_content_publishing:iq_content_publishing

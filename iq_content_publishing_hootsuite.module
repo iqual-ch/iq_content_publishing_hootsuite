@@ -1,0 +1,63 @@
+<?php
+
+/**
+ * @file
+ * Hootsuite integration for the Content Publishing framework.
+ */
+
+declare(strict_types=1);
+
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Url;
+
+/**
+ * Implements hook_entity_operation().
+ *
+ * Adds Hootsuite-specific operations (Connect, Disconnect, Fetch Profiles)
+ * to Hootsuite platform config entities on the admin list.
+ */
+function iq_content_publishing_hootsuite_entity_operation(EntityInterface $entity): array {
+  $operations = [];
+
+  if ($entity->getEntityTypeId() !== 'publishing_platform') {
+    return $operations;
+  }
+
+  /** @var \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface $entity */
+  if ($entity->getPluginId() !== 'hootsuite') {
+    return $operations;
+  }
+
+  $credentials = $entity->getCredentials();
+
+  if (empty($credentials['access_token'])) {
+    // Not connected — show Connect link.
+    $operations['hootsuite_connect'] = [
+      'title' => t('Connect to Hootsuite'),
+      'url' => Url::fromRoute('iq_content_publishing_hootsuite.oauth_connect', [
+        'platform_config' => $entity->id(),
+      ]),
+      'weight' => 50,
+    ];
+  }
+  else {
+    // Connected — show Disconnect and Fetch Profiles links.
+    $operations['hootsuite_disconnect'] = [
+      'title' => t('Disconnect Hootsuite'),
+      'url' => Url::fromRoute('iq_content_publishing_hootsuite.oauth_disconnect', [
+        'platform_config' => $entity->id(),
+      ]),
+      'weight' => 51,
+    ];
+
+    $operations['hootsuite_fetch_profiles'] = [
+      'title' => t('Fetch Social Profiles'),
+      'url' => Url::fromRoute('iq_content_publishing_hootsuite.fetch_profiles', [
+        'platform_config' => $entity->id(),
+      ]),
+      'weight' => 52,
+    ];
+  }
+
+  return $operations;
+}

@@ -1,0 +1,31 @@
+iq_content_publishing_hootsuite.oauth_callback:
+  path: '/admin/config/content-publishing/hootsuite/oauth/callback'
+  defaults:
+    _controller: '\Drupal\iq_content_publishing_hootsuite\Controller\HootsuiteOAuthController::callback'
+    _title: 'Hootsuite OAuth Callback'
+  requirements:
+    _permission: 'administer content publishing'
+
+iq_content_publishing_hootsuite.oauth_connect:
+  path: '/admin/config/content-publishing/hootsuite/oauth/connect/{platform_config}'
+  defaults:
+    _controller: '\Drupal\iq_content_publishing_hootsuite\Controller\HootsuiteOAuthController::connect'
+    _title: 'Connect to Hootsuite'
+  requirements:
+    _permission: 'administer content publishing'
+
+iq_content_publishing_hootsuite.oauth_disconnect:
+  path: '/admin/config/content-publishing/hootsuite/oauth/disconnect/{platform_config}'
+  defaults:
+    _controller: '\Drupal\iq_content_publishing_hootsuite\Controller\HootsuiteOAuthController::disconnect'
+    _title: 'Disconnect Hootsuite'
+  requirements:
+    _permission: 'administer content publishing'
+
+iq_content_publishing_hootsuite.fetch_profiles:
+  path: '/admin/config/content-publishing/hootsuite/fetch-profiles/{platform_config}'
+  defaults:
+    _controller: '\Drupal\iq_content_publishing_hootsuite\Controller\HootsuiteOAuthController::fetchProfiles'
+    _title: 'Fetch Hootsuite Social Profiles'
+  requirements:
+    _permission: 'administer content publishing'

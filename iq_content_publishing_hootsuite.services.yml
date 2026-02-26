@@ -1,0 +1,8 @@
+services:
+  iq_content_publishing_hootsuite.api_client:
+    class: Drupal\iq_content_publishing_hootsuite\Service\HootsuiteApiClient
+    arguments:
+      - '@http_client'
+      - '@logger.factory'
+      - '@config.factory'
+      - '@entity_type.manager'
