@@ -1,5 +1,5 @@
 {
-  "name": "drupal/iq_content_publishing_hootsuite",
+  "name": "iqual/iq_content_publishing_hootsuite",
   "type": "drupal-module",
   "description": "Provides Hootsuite integration for the Content Publishing framework. Enables publishing Drupal content to social media platforms via the Hootsuite API.",
   "keywords": [
@@ -9,11 +9,11 @@
     "content publishing"
   ],
   "license": "GPL-2.0-or-later",
-  "homepage": "https://www.drupal.org/project/iq_content_publishing_hootsuite",
+  "homepage": "https://github.com/iqual-ch/iq_content_publishing_hootsuite",
   "minimum-stability": "dev",
   "require": {
     "drupal/core": "^11",
-    "drupal/iq_content_publishing": "^1"
+    "iqual/iq_content_publishing": "^1"
   },
   "extra": {
     "drupal": {
