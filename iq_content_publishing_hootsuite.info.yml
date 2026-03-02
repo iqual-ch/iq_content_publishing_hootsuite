@@ -5,3 +5,4 @@ package: 'Content Publishing'
 core_version_requirement: ^11
 dependencies:
   - iq_content_publishing:iq_content_publishing
+  - iq_hootsuite_api:iq_hootsuite_api

@@ -9,7 +9,7 @@ use Drupal\Core\Url;
 use Drupal\iq_content_publishing\Attribute\ContentPublishingPlatform;
 use Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformBase;
 use Drupal\iq_content_publishing\Plugin\PublishingResult;
-use Drupal\iq_content_publishing_hootsuite\Service\HootsuiteApiClient;
+use Drupal\iq_hootsuite_api\Service\HootsuiteApiClientInterface;
 use Drupal\node\NodeInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -18,6 +18,9 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
  *
  * Publishes AI-generated content to social media platforms
  * through the Hootsuite scheduling API.
+ *
+ * OAuth2 authentication and token management are handled centrally
+ * by the iq_hootsuite_api module.
  */
 #[ContentPublishingPlatform(
   id: 'hootsuite',
@@ -27,16 +30,16 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 final class HootsuitePlatform extends ContentPublishingPlatformBase {
 
   /**
-   * The Hootsuite API client.
+   * The Hootsuite API client (from iq_hootsuite_api module).
    */
-  protected HootsuiteApiClient $apiClient;
+  protected HootsuiteApiClientInterface $apiClient;
 
   /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition): static {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
-    $instance->apiClient = $container->get('iq_content_publishing_hootsuite.api_client');
+    $instance->apiClient = $container->get('iq_hootsuite_api.client');
     return $instance;
   }
 
@@ -92,62 +95,52 @@ INSTRUCTIONS;
    * {@inheritdoc}
    */
   public function buildCredentialsForm(array $form, array $credentials): array {
-    $form['client_id'] = [
-      '#type' => 'textfield',
-      '#title' => $this->t('OAuth2 Client ID'),
-      '#description' => $this->t('Your Hootsuite application Client ID from the <a href="https://hootsuite.com/developers/my-apps" target="_blank">Hootsuite Developer Portal</a>.'),
-      '#default_value' => $credentials['client_id'] ?? '',
-      '#required' => TRUE,
-    ];
+    // Authentication is managed centrally by the iq_hootsuite_api module.
+    // Check connection status by calling the API.
+    $connected = FALSE;
+    $accountInfo = '';
 
-    $form['client_secret'] = [
-      '#type' => 'textfield',
-      '#title' => $this->t('OAuth2 Client Secret'),
-      '#description' => $this->t('Your Hootsuite application Client Secret.'),
-      '#default_value' => $credentials['client_secret'] ?? '',
-      '#required' => TRUE,
-    ];
+    try {
+      $me = $this->apiClient->getMe();
+      if ($me && !empty($me['data'])) {
+        $connected = TRUE;
+        $fullName = $me['data']['fullName'] ?? '';
+        $email = $me['data']['email'] ?? '';
+        $accountInfo = trim("{$fullName} ({$email})", ' ()');
+      }
+    }
+    catch (\Exception $e) {
+      // Not connected or API error.
+    }
 
-    // Show connection status.
-    if (!empty($credentials['access_token'])) {
-      $tokenExpires = $credentials['token_expires'] ?? 0;
-      $isExpired = $tokenExpires < time();
+    $settingsUrl = Url::fromRoute('iq_hootsuite_api.settings')->toString();
 
+    if ($connected) {
       $form['connection_status'] = [
         '#type' => 'item',
         '#title' => $this->t('Connection Status'),
-        '#markup' => $isExpired
-          ? '<span style="color: orange;">⚠ Token expired — will auto-refresh on next publish.</span>'
-          : '<span style="color: green;">✓ Connected to Hootsuite</span>',
+        '#markup' => '<span style="color: green;">✓ Connected to Hootsuite</span>'
+          . ($accountInfo ? ' — ' . $accountInfo : ''),
+      ];
+    }
+    else {
+      $form['connection_status'] = [
+        '#type' => 'item',
+        '#title' => $this->t('Connection Status'),
+        '#markup' => '<span style="color: red;">✗ Not connected to Hootsuite.</span><br>'
+          . $this->t('Please <a href="@url">configure and authorize Hootsuite</a> in the Hootsuite API settings.', [
+            '@url' => $settingsUrl,
+          ]),
       ];
     }
 
-    // Hidden fields to preserve token values across form submissions.
-    $form['access_token'] = [
-      '#type' => 'hidden',
-      '#default_value' => $credentials['access_token'] ?? '',
-    ];
-    $form['refresh_token'] = [
-      '#type' => 'hidden',
-      '#default_value' => $credentials['refresh_token'] ?? '',
-    ];
-    $form['token_expires'] = [
-      '#type' => 'hidden',
-      '#default_value' => $credentials['token_expires'] ?? 0,
-    ];
-
-    // OAuth connect/disconnect links (only work after entity is saved).
-    $form['oauth_actions'] = [
+    $form['api_settings_link'] = [
       '#type' => 'item',
-      '#title' => $this->t('Hootsuite Authorization'),
+      '#title' => $this->t('Hootsuite API Settings'),
+      '#markup' => $this->t('<a href="@url">Hootsuite API configuration</a> — manage OAuth2 credentials and connection.', [
+        '@url' => $settingsUrl,
+      ]),
     ];
-
-    if (!empty($credentials['access_token'])) {
-      $form['oauth_actions']['#markup'] = $this->t('You are connected to Hootsuite. Save the platform configuration first, then use the operations dropdown on the platform list to disconnect or refresh the connection.');
-    }
-    else {
-      $form['oauth_actions']['#markup'] = $this->t('Save this platform configuration first with your Client ID and Secret, then use the <strong>Connect to Hootsuite</strong> link from the platform list to authorize.');
-    }
 
     return $form;
   }
@@ -192,32 +185,21 @@ INSTRUCTIONS;
    * {@inheritdoc}
    */
   public function validateCredentials(array $credentials): bool {
-    if (empty($credentials['client_id']) || empty($credentials['client_secret'])) {
+    // Authentication is managed by iq_hootsuite_api.
+    // Validate by checking if we can reach the API.
+    try {
+      $me = $this->apiClient->getMe();
+      return $me !== FALSE && !empty($me['data']);
+    }
+    catch (\Exception $e) {
       return FALSE;
     }
-
-    // If we have an access token, validate it.
-    if (!empty($credentials['access_token'])) {
-      return $this->apiClient->validateConnection($credentials['access_token']);
-    }
-
-    // Without an access token, we just check that client ID/secret are present.
-    return TRUE;
   }
 
   /**
    * {@inheritdoc}
    */
   public function publish(NodeInterface $node, array $fields, array $credentials, array $settings): PublishingResult {
-    // Get a valid access token (handles refresh if needed).
-    $accessToken = $this->apiClient->getValidAccessToken($credentials);
-    if (!$accessToken) {
-      return PublishingResult::failure(
-        'No valid Hootsuite access token available. Please re-authorize the connection.',
-        ['error' => 'token_unavailable']
-      );
-    }
-
     // Determine social profiles to publish to.
     $socialProfileIds = $settings['social_profile_ids'] ?? [];
     if (empty($socialProfileIds)) {
@@ -251,46 +233,59 @@ INSTRUCTIONS;
     if (is_array($images)) {
       foreach ($images as $imageData) {
         if (is_array($imageData) && !empty($imageData['url'])) {
-          $mediaUrls[] = $imageData['url'];
+          $mediaUrls[] = ['url' => $imageData['url']];
         }
       }
     }
 
-    // Determine scheduling.
+    // Determine scheduling — Hootsuite requires at least 5 minutes in the future.
     $sendNow = $settings['send_now'] ?? TRUE;
     $delayMinutes = (int) ($settings['scheduled_delay_minutes'] ?? 5);
+    $delay = $sendNow ? 5 : max(5, $delayMinutes);
 
-    // Schedule the message via the Hootsuite API.
+    $sendTime = new \DateTimeImmutable(
+      '+' . $delay . ' minutes',
+      new \DateTimeZone('UTC')
+    );
+    $scheduledSendTime = $sendTime->format('Y-m-d\TH:i:s\Z');
+
+    // Build options for the API client.
+    $options = [
+      'emailNotification' => FALSE,
+    ];
+    if (!empty($mediaUrls)) {
+      $options['mediaUrls'] = $mediaUrls;
+    }
+
+    // Schedule the message via the iq_hootsuite_api module.
     $result = $this->apiClient->scheduleMessage(
-      $accessToken,
       $text,
       array_values($socialProfileIds),
-      $sendNow,
-      $delayMinutes,
-      $mediaUrls,
+      $scheduledSendTime,
+      $options,
     );
 
-    if ($result['success']) {
-      $messageIds = $result['message_ids'] ?? [];
-      $scheduledTime = $result['scheduled_time'] ?? 'unknown';
+    if ($result !== FALSE && !empty($result['data'])) {
+      $messageIds = array_map(fn($msg) => $msg['id'] ?? '', $result['data']);
+      $messageIds = array_filter($messageIds);
       $profileCount = count($socialProfileIds);
 
       return PublishingResult::success(
-        "Successfully scheduled to {$profileCount} social profile(s) via Hootsuite. Scheduled for: {$scheduledTime}",
+        "Successfully scheduled to {$profileCount} social profile(s) via Hootsuite. Scheduled for: {$scheduledSendTime}",
         [
           'message_ids' => $messageIds,
-          'scheduled_time' => $scheduledTime,
+          'scheduled_time' => $scheduledSendTime,
           'social_profiles' => $socialProfileIds,
-          'api_response' => $result['data'] ?? [],
+          'api_response' => $result['data'],
         ]
       );
     }
 
     return PublishingResult::failure(
-      'Failed to schedule Hootsuite message: ' . ($result['error'] ?? 'Unknown error'),
+      'Failed to schedule Hootsuite message. Check the Hootsuite API logs for details.',
       [
-        'error' => $result['error'] ?? '',
-        'response_body' => $result['response_body'] ?? '',
+        'error' => 'schedule_failed',
+        'api_response' => $result,
       ]
     );
   }

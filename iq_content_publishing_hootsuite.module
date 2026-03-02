@@ -3,6 +3,8 @@
 /**
  * @file
  * Hootsuite integration for the Content Publishing framework.
+ *
+ * OAuth2 authentication is managed centrally by the iq_hootsuite_api module.
  */
 
 declare(strict_types=1);
@@ -13,8 +15,8 @@ use Drupal\Core\Url;
 /**
  * Implements hook_entity_operation().
  *
- * Adds Hootsuite-specific operations (Connect, Disconnect, Fetch Profiles)
- * to Hootsuite platform config entities on the admin list.
+ * Adds the "Fetch Social Profiles" operation to Hootsuite platform
+ * config entities on the admin list.
  */
 function iq_content_publishing_hootsuite_entity_operation(EntityInterface $entity): array {
   $operations = [];
@@ -28,34 +30,23 @@ function iq_content_publishing_hootsuite_entity_operation(EntityInterface $entit
     return $operations;
   }
 
-  $credentials = $entity->getCredentials();
+  // Check if Hootsuite API is connected (token stored in State).
+  $accessToken = \Drupal::state()->get('iq_hootsuite_api.access_token');
 
-  if (empty($credentials['access_token'])) {
-    // Not connected — show Connect link.
-    $operations['hootsuite_connect'] = [
-      'title' => t('Connect to Hootsuite'),
-      'url' => Url::fromRoute('iq_content_publishing_hootsuite.oauth_connect', [
-        'platform_config' => $entity->id(),
-      ]),
-      'weight' => 50,
-    ];
-  }
-  else {
-    // Connected — show Disconnect and Fetch Profiles links.
-    $operations['hootsuite_disconnect'] = [
-      'title' => t('Disconnect Hootsuite'),
-      'url' => Url::fromRoute('iq_content_publishing_hootsuite.oauth_disconnect', [
-        'platform_config' => $entity->id(),
-      ]),
-      'weight' => 51,
-    ];
-
+  if (!empty($accessToken)) {
     $operations['hootsuite_fetch_profiles'] = [
       'title' => t('Fetch Social Profiles'),
       'url' => Url::fromRoute('iq_content_publishing_hootsuite.fetch_profiles', [
         'platform_config' => $entity->id(),
       ]),
       'weight' => 52,
+    ];
+  }
+  else {
+    $operations['hootsuite_configure'] = [
+      'title' => t('Configure Hootsuite API'),
+      'url' => Url::fromRoute('iq_hootsuite_api.settings'),
+      'weight' => 50,
     ];
   }
 
