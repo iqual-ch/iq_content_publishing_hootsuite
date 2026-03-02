@@ -160,7 +160,7 @@ INSTRUCTIONS;
       '#type' => 'textarea',
       '#title' => $this->t('Social Profile IDs'),
       '#description' => $this->t('Enter one Hootsuite social profile ID per line. You can find these by connecting your Hootsuite account and using the "Fetch Profiles" action from the platform list.'),
-      '#default_value' => implode("\n", $settings['social_profile_ids'] ?? []),
+      '#default_value' => is_array($settings['social_profile_ids'] ?? '') ? implode("\n", $settings['social_profile_ids']) : ($settings['social_profile_ids'] ?? ''),
       '#rows' => 4,
     ];
 
