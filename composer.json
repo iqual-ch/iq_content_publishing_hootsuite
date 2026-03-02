@@ -14,7 +14,7 @@
   "require": {
     "drupal/core": "^11",
     "iqual/iq_content_publishing": "^1",
-    "iqual/iq_content_publishing_hootsuite": "^1"
+    "iqual/iq_hootsuite_api": "^1"
   },
   "extra": {
     "drupal": {
