@@ -199,7 +199,7 @@ INSTRUCTIONS;
   /**
    * {@inheritdoc}
    */
-  public function publish(NodeInterface $node, array $fields, array $credentials, array $settings): PublishingResult {
+  public function publish(NodeInterface $node, array $fields, array $credentials, array $settings, string|int|null $toolId = NULL): PublishingResult {
     // Determine social profiles to publish to.
     $socialProfileIds = $settings['social_profile_ids'] ?? [];
     if (empty($socialProfileIds)) {
