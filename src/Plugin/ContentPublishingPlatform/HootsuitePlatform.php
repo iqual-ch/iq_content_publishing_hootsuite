@@ -148,7 +148,7 @@ INSTRUCTIONS;
   /**
    * {@inheritdoc}
    */
-  public function buildSettingsForm(array $form, array $settings): array {
+  public function buildSettingsForm(array $form, array $settings, array $credentials = []): array {
     $form['social_profile_ids'] = [
       '#type' => 'textarea',
       '#title' => $this->t('Social Profile IDs'),
