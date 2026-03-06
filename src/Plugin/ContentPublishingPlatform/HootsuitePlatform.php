@@ -149,33 +149,44 @@ INSTRUCTIONS;
    * {@inheritdoc}
    */
   public function buildSettingsForm(array $form, array $settings, array $credentials = []): array {
+    $options = [];
+    $fetchError = FALSE;
+
+    try {
+      $result = $this->apiClient->getSocialProfiles();
+      if ($result && !empty($result['data'])) {
+        foreach ($result['data'] as $profile) {
+          $id = $profile['id'] ?? '';
+          $type = $profile['type'] ?? 'UNKNOWN';
+          $username = $profile['socialNetworkUsername'] ?? 'N/A';
+          if ($id) {
+            $options[$id] = "[{$type}] {$username} (ID: {$id})";
+          }
+        }
+      }
+    }
+    catch (\Exception $e) {
+      $fetchError = TRUE;
+    }
+
+    if (empty($options)) {
+      $settingsUrl = Url::fromRoute('iq_hootsuite_api.settings')->toString();
+      $form['social_profile_ids_notice'] = [
+        '#type' => 'item',
+        '#title' => $this->t('Social Profiles'),
+        '#markup' => $fetchError
+          ? $this->t('Could not fetch social profiles from Hootsuite. Please check your <a href="@url">API connection</a>.', ['@url' => $settingsUrl])
+          : $this->t('No social profiles found. Please ensure profiles are connected in your <a href="@url">Hootsuite account</a>.', ['@url' => $settingsUrl]),
+      ];
+    }
+
     $form['social_profile_ids'] = [
-      '#type' => 'textarea',
-      '#title' => $this->t('Social Profile IDs'),
-      '#description' => $this->t('Enter one Hootsuite social profile ID per line. You can find these by connecting your Hootsuite account and using the "Fetch Profiles" action from the platform list.'),
-      '#default_value' => is_array($settings['social_profile_ids'] ?? '') ? implode("\n", $settings['social_profile_ids']) : ($settings['social_profile_ids'] ?? ''),
-      '#rows' => 4,
-    ];
-
-    $form['send_now'] = [
-      '#type' => 'checkbox',
-      '#title' => $this->t('Publish as soon as possible'),
-      '#description' => $this->t('When checked, messages are scheduled 5 minutes from now (Hootsuite minimum). Otherwise, the configured delay is used.'),
-      '#default_value' => $settings['send_now'] ?? TRUE,
-    ];
-
-    $form['scheduled_delay_minutes'] = [
-      '#type' => 'number',
-      '#title' => $this->t('Scheduled delay (minutes)'),
-      '#description' => $this->t('How many minutes from now to schedule the post. Minimum is 5 (Hootsuite requirement).'),
-      '#default_value' => $settings['scheduled_delay_minutes'] ?? 5,
-      '#min' => 5,
-      '#max' => 43200,
-      '#states' => [
-        'visible' => [
-          ':input[name="plugin_settings[send_now]"]' => ['checked' => FALSE],
-        ],
-      ],
+      '#type' => 'checkboxes',
+      '#title' => $this->t('Social Profiles'),
+      '#description' => $this->t('Select the Hootsuite social profiles to publish to.'),
+      '#options' => $options,
+      '#default_value' => $settings['social_profile_ids'] ?? [],
+      '#access' => !empty($options),
     ];
 
     return $form;
@@ -209,8 +220,8 @@ INSTRUCTIONS;
       );
     }
 
-    // Filter out empty lines.
-    $socialProfileIds = array_filter(array_map('trim', $socialProfileIds));
+    // Filter out unchecked profiles (checkboxes return 0 for unchecked).
+    $socialProfileIds = array_filter($socialProfileIds);
     if (empty($socialProfileIds)) {
       return PublishingResult::failure(
         'No valid social profile IDs configured.',
@@ -238,10 +249,8 @@ INSTRUCTIONS;
       }
     }
 
-    // Determine scheduling — Hootsuite requires at least 5 minutes in the future.
-    $sendNow = $settings['send_now'] ?? TRUE;
-    $delayMinutes = (int) ($settings['scheduled_delay_minutes'] ?? 5);
-    $delay = $sendNow ? 5 : max(5, $delayMinutes);
+    // Hootsuite requires scheduling at least 5 minutes in the future.
+    $delay = 5;
 
     $sendTime = new \DateTimeImmutable(
       '+' . $delay . ' minutes',
