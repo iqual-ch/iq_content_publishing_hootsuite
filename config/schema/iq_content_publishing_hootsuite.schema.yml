@@ -22,12 +22,6 @@ iq_content_publishing_hootsuite.settings.hootsuite:
   type: mapping
   label: 'Hootsuite platform settings'
   mapping:
-    social_profile_ids:
-      type: sequence
-      label: 'Social Profile IDs to publish to'
-      sequence:
-        type: string
-        label: 'Social Profile ID'
     send_now:
       type: boolean
       label: 'Publish immediately (instead of scheduling)'

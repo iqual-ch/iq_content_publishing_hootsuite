@@ -36,6 +36,10 @@ final class HootsuiteController extends ControllerBase {
   /**
    * Fetches and displays available social profiles from Hootsuite.
    *
+   * Profiles are automatically used as tools when the platform implements
+   * MultiToolPlatformInterface. This action serves as a diagnostic view
+   * to see what profiles are connected.
+   *
    * @param \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface $platform_config
    *   The platform config entity.
    *
@@ -59,7 +63,7 @@ final class HootsuiteController extends ControllerBase {
 
     $profiles = $result['data'];
 
-    $this->messenger()->addStatus($this->t('Found @count social profile(s):', [
+    $this->messenger()->addStatus($this->t('Found @count social profile(s). These will appear as individual tools when publishing:', [
       '@count' => count($profiles),
     ]));
 
@@ -75,7 +79,7 @@ final class HootsuiteController extends ControllerBase {
       ]));
     }
 
-    $this->messenger()->addStatus($this->t('Copy the desired ID(s) into the "Social Profile IDs" field in the platform settings.'));
+    $this->messenger()->addStatus($this->t('Save the platform configuration and enable the desired profiles in the <strong>Tools</strong> section.'));
 
     return new RedirectResponse(
       Url::fromRoute('entity.publishing_platform.edit_form', [

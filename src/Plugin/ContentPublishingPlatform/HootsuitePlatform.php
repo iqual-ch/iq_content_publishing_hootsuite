@@ -8,6 +8,7 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Url;
 use Drupal\iq_content_publishing\Attribute\ContentPublishingPlatform;
 use Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformBase;
+use Drupal\iq_content_publishing\Plugin\MultiToolPlatformInterface;
 use Drupal\iq_content_publishing\Plugin\PublishingResult;
 use Drupal\iq_hootsuite_api\Service\HootsuiteApiClientInterface;
 use Drupal\node\NodeInterface;
@@ -17,7 +18,9 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
  * Hootsuite publishing platform plugin.
  *
  * Publishes AI-generated content to social media platforms
- * through the Hootsuite scheduling API.
+ * through the Hootsuite scheduling API. Each connected social profile
+ * is exposed as a separate tool, allowing per-profile content generation
+ * and publishing.
  *
  * OAuth2 authentication and token management are handled centrally
  * by the iq_hootsuite_api module.
@@ -27,12 +30,17 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
   label: new TranslatableMarkup('Hootsuite'),
   description: new TranslatableMarkup('Publish content to social media platforms via Hootsuite.'),
 )]
-final class HootsuitePlatform extends ContentPublishingPlatformBase {
+final class HootsuitePlatform extends ContentPublishingPlatformBase implements MultiToolPlatformInterface {
 
   /**
    * The Hootsuite API client (from iq_hootsuite_api module).
    */
   protected HootsuiteApiClientInterface $apiClient;
+
+  /**
+   * Cached available tools to avoid redundant API calls within a request.
+   */
+  protected array $availableToolsCache = [];
 
   /**
    * {@inheritdoc}
@@ -80,6 +88,131 @@ Guidelines:
 - Include a clear call-to-action.
 - Use relevant hashtags (2-3 maximum).
 - Include the content URL at the end of the text.
+- Maintain the brand voice: professional yet approachable.
+- Do NOT include any markdown formatting.
+
+Available tokens:
+- [node:title] — The content title.
+- [node:url] — The full URL to the content.
+- [node:summary] — The content summary.
+- [node:content_type] — The content type label.
+INSTRUCTIONS;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getAvailableTools(array $settings = []): array {
+    $cacheKey = md5(serialize($settings));
+    if (isset($this->availableToolsCache[$cacheKey])) {
+      return $this->availableToolsCache[$cacheKey];
+    }
+
+    $tools = [];
+
+    try {
+      $result = $this->apiClient->getSocialProfiles();
+      if ($result && !empty($result['data'])) {
+        foreach ($result['data'] as $profile) {
+          $id = $profile['id'] ?? '';
+          if (empty($id)) {
+            continue;
+          }
+          $type = $profile['type'] ?? 'UNKNOWN';
+          $username = $profile['socialNetworkUsername'] ?? 'N/A';
+          $profileName = "[{$type}] {$username}";
+
+          $tools[$id] = [
+            'id' => $id,
+            'name' => $profileName,
+            'description' => (string) $this->t('Post to @profile via Hootsuite.', [
+              '@profile' => $profileName,
+            ]),
+            'group' => 'social',
+            'group_label' => (string) $this->t('Social Profiles'),
+            'network_type' => $type,
+          ];
+        }
+      }
+    }
+    catch (\Exception) {
+      // API not reachable — return empty tools.
+    }
+
+    $this->availableToolsCache[$cacheKey] = $tools;
+    return $tools;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getOutputSchemaForTool(string|int $toolId): array {
+    // Resolve the network type for character limit hints.
+    $maxLength = 280;
+    $tools = $this->availableToolsCache;
+    foreach ($tools as $cache) {
+      if (isset($cache[(string) $toolId])) {
+        $networkType = strtoupper($cache[(string) $toolId]['network_type'] ?? '');
+        if (in_array($networkType, ['LINKEDIN', 'FACEBOOKPAGE', 'FACEBOOK'], TRUE)) {
+          $maxLength = 3000;
+        }
+        break;
+      }
+    }
+
+    return [
+      'text' => [
+        'type' => 'textarea',
+        'label' => (string) $this->t('Post text'),
+        'description' => (string) $this->t('The main content of the social media post.'),
+        'required' => TRUE,
+        'max_length' => $maxLength,
+        'ai_generated' => TRUE,
+      ],
+      'image' => [
+        'type' => 'image',
+        'label' => (string) $this->t('Image'),
+        'description' => (string) $this->t('Image to attach to the post.'),
+        'required' => FALSE,
+        'max' => 1,
+        'ai_generated' => FALSE,
+      ],
+    ];
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getDefaultAiInstructionsForTool(string|int $toolId): string {
+    // Try to resolve the profile name and network for a tailored prompt.
+    $profileName = 'social media';
+    $networkType = '';
+    $tools = $this->availableToolsCache;
+    foreach ($tools as $cache) {
+      if (isset($cache[(string) $toolId])) {
+        $profileName = $cache[(string) $toolId]['name'];
+        $networkType = strtoupper($cache[(string) $toolId]['network_type'] ?? '');
+        break;
+      }
+    }
+
+    // Infer character limit guidance per network.
+    $charGuidance = match ($networkType) {
+      'TWITTER' => 'Keep under 280 characters. Use hashtags sparingly (2-3 max).',
+      'LINKEDIN' => 'Keep under 3000 characters. Use a professional tone with industry-relevant insights.',
+      'FACEBOOKPAGE', 'FACEBOOK' => 'Keep under 500 characters for best engagement. Use an engaging, conversational tone.',
+      'INSTAGRAM', 'INSTAGRAMBUSINESS' => 'Write a caption with relevant hashtags (5-10). Include a call-to-action.',
+      default => 'Keep the text concise and engaging. Adapt length to the platform.',
+    };
+
+    return <<<INSTRUCTIONS
+Create a compelling {$profileName} post based on the following Drupal content.
+
+Guidelines:
+- {$charGuidance}
+- Use an attention-grabbing opening.
+- Include a clear call-to-action.
+- Include the content URL using [node:url] at the end.
 - Maintain the brand voice: professional yet approachable.
 - Do NOT include any markdown formatting.
 
@@ -149,44 +282,34 @@ INSTRUCTIONS;
    * {@inheritdoc}
    */
   public function buildSettingsForm(array $form, array $settings, array $credentials = []): array {
-    $options = [];
-    $fetchError = FALSE;
+    $form['scheduling'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Scheduling'),
+      '#open' => TRUE,
+    ];
 
-    try {
-      $result = $this->apiClient->getSocialProfiles();
-      if ($result && !empty($result['data'])) {
-        foreach ($result['data'] as $profile) {
-          $id = $profile['id'] ?? '';
-          $type = $profile['type'] ?? 'UNKNOWN';
-          $username = $profile['socialNetworkUsername'] ?? 'N/A';
-          if ($id) {
-            $options[$id] = "[{$type}] {$username} (ID: {$id})";
-          }
-        }
-      }
-    }
-    catch (\Exception $e) {
-      $fetchError = TRUE;
-    }
+    $form['scheduling']['scheduled_delay_minutes'] = [
+      '#type' => 'number',
+      '#title' => $this->t('Scheduling delay (minutes)'),
+      '#description' => $this->t('Hootsuite requires scheduling at least 5 minutes in the future. Set the delay in minutes from the time of publishing.'),
+      '#default_value' => $settings['scheduled_delay_minutes'] ?? 5,
+      '#min' => 5,
+      '#parents' => ['plugin_settings', 'scheduled_delay_minutes'],
+    ];
 
-    if (empty($options)) {
-      $settingsUrl = Url::fromRoute('iq_hootsuite_api.settings')->toString();
-      $form['social_profile_ids_notice'] = [
-        '#type' => 'item',
-        '#title' => $this->t('Social Profiles'),
-        '#markup' => $fetchError
-          ? $this->t('Could not fetch social profiles from Hootsuite. Please check your <a href="@url">API connection</a>.', ['@url' => $settingsUrl])
-          : $this->t('No social profiles found. Please ensure profiles are connected in your <a href="@url">Hootsuite account</a>.', ['@url' => $settingsUrl]),
-      ];
-    }
+    $form['scheduling']['send_now'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Send as soon as possible'),
+      '#description' => $this->t('When checked, posts will be scheduled with the minimum delay (5 minutes). When unchecked, the delay above is used.'),
+      '#default_value' => $settings['send_now'] ?? FALSE,
+      '#parents' => ['plugin_settings', 'send_now'],
+    ];
 
-    $form['social_profile_ids'] = [
-      '#type' => 'checkboxes',
+    // Show a note about tool selection.
+    $form['profiles_info'] = [
+      '#type' => 'item',
       '#title' => $this->t('Social Profiles'),
-      '#description' => $this->t('Select the Hootsuite social profiles to publish to.'),
-      '#options' => $options,
-      '#default_value' => $settings['social_profile_ids'] ?? [],
-      '#access' => !empty($options),
+      '#markup' => $this->t('Social profiles are automatically discovered from Hootsuite and shown as individual tools when publishing. Select which profiles to enable in the <strong>Tools</strong> section above after saving.'),
     ];
 
     return $form;
@@ -211,21 +334,12 @@ INSTRUCTIONS;
    * {@inheritdoc}
    */
   public function publish(NodeInterface $node, array $fields, array $credentials, array $settings, string|int|null $toolId = NULL): PublishingResult {
-    // Determine social profiles to publish to.
-    $socialProfileIds = $settings['social_profile_ids'] ?? [];
-    if (empty($socialProfileIds)) {
+    // The toolId is the social profile ID.
+    $socialProfileId = $toolId !== NULL ? (string) $toolId : '';
+    if (empty($socialProfileId)) {
       return PublishingResult::failure(
-        'No social profile IDs configured. Please configure at least one Hootsuite social profile.',
-        ['error' => 'no_profiles']
-      );
-    }
-
-    // Filter out unchecked profiles (checkboxes return 0 for unchecked).
-    $socialProfileIds = array_filter($socialProfileIds);
-    if (empty($socialProfileIds)) {
-      return PublishingResult::failure(
-        'No valid social profile IDs configured.',
-        ['error' => 'no_valid_profiles']
+        'No social profile specified. Each social profile is a separate tool — please select one when publishing.',
+        ['error' => 'no_profile']
       );
     }
 
@@ -249,8 +363,9 @@ INSTRUCTIONS;
       }
     }
 
-    // Hootsuite requires scheduling at least 5 minutes in the future.
-    $delay = 5;
+    // Determine scheduling delay.
+    $sendNow = !empty($settings['send_now']);
+    $delay = $sendNow ? 5 : max(5, (int) ($settings['scheduled_delay_minutes'] ?? 5));
 
     $sendTime = new \DateTimeImmutable(
       '+' . $delay . ' minutes',
@@ -266,10 +381,10 @@ INSTRUCTIONS;
       $options['mediaUrls'] = $mediaUrls;
     }
 
-    // Schedule the message via the iq_hootsuite_api module.
+    // Schedule the message to the specific profile via the Hootsuite API.
     $result = $this->apiClient->scheduleMessage(
       $text,
-      array_values($socialProfileIds),
+      [$socialProfileId],
       $scheduledSendTime,
       $options,
     );
@@ -277,14 +392,13 @@ INSTRUCTIONS;
     if ($result !== FALSE && !empty($result['data'])) {
       $messageIds = array_map(fn($msg) => $msg['id'] ?? '', $result['data']);
       $messageIds = array_filter($messageIds);
-      $profileCount = count($socialProfileIds);
 
       return PublishingResult::success(
-        "Successfully scheduled to {$profileCount} social profile(s) via Hootsuite. Scheduled for: {$scheduledSendTime}",
+        "Successfully scheduled to Hootsuite profile {$socialProfileId}. Scheduled for: {$scheduledSendTime}",
         [
           'message_ids' => $messageIds,
           'scheduled_time' => $scheduledSendTime,
-          'social_profiles' => $socialProfileIds,
+          'social_profile_id' => $socialProfileId,
           'api_response' => $result['data'],
         ]
       );
@@ -294,6 +408,7 @@ INSTRUCTIONS;
       'Failed to schedule Hootsuite message. Check the Hootsuite API logs for details.',
       [
         'error' => 'schedule_failed',
+        'social_profile_id' => $socialProfileId,
         'api_response' => $result,
       ]
     );
