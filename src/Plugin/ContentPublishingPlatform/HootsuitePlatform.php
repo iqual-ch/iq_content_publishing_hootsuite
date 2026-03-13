@@ -412,7 +412,7 @@ INSTRUCTIONS;
         try {
           $mediaData = $this->apiClient->uploadImage($file);
           if (!empty($mediaData['downloadUrl'])) {
-            $options['mediaUrls'][] = $mediaData['downloadUrl'];
+            $options['mediaUrls'][] = ['url' => $mediaData['downloadUrl']];
           }
         }
         catch (\Exception $e) {
