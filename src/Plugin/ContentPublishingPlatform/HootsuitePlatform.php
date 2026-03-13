@@ -410,9 +410,9 @@ INSTRUCTIONS;
       // Media must be uploaded to Hootsuite first to get media IDs.
       foreach ($mediaFiles as $file) {
         try {
-          $mediaId = $this->apiClient->uploadImage($file);
-          if ($mediaId !== NULL) {
-            $options['mediaIds'][] = $mediaId;
+          $mediaData = $this->apiClient->uploadImage($file);
+          if (!empty($mediaData['downloadUrl'])) {
+            $options['mediaUrls'][] = $mediaData['downloadUrl'];
           }
         }
         catch (\Exception $e) {
