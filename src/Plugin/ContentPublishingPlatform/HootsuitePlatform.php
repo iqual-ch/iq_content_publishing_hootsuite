@@ -411,8 +411,8 @@ INSTRUCTIONS;
       foreach ($mediaFiles as $file) {
         try {
           $mediaData = $this->apiClient->uploadImage($file);
-          if (!empty($mediaData['downloadUrl'])) {
-            $options['mediaUrls'][] = ['url' => $mediaData['downloadUrl']];
+          if (!empty($mediaData['id'])) {
+            $options['media'][] = ['id' => $mediaData['id']];
           }
         }
         catch (\Exception $e) {
