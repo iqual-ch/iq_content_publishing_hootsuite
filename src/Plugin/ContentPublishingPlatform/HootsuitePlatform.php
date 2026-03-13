@@ -377,9 +377,7 @@ INSTRUCTIONS;
       : NULL;
     
       // Build options for the API client.
-    $options = [
-      'emailNotification' => FALSE,
-    ];
+    $options = [];
     if (!empty($mediaUrls)) {
       $options['mediaUrls'] = $mediaUrls;
     }
