@@ -177,6 +177,12 @@ INSTRUCTIONS;
         'max' => 1,
         'ai_generated' => FALSE,
       ],
+      'scheduled_time' => [
+        '#type' => 'datetime',
+        '#title' => (string) $this->t('Scheduled time'),
+        '#description' => (string) $this->t('The date and time to schedule the post for. Must be in the future.'),
+        '#required' => TRUE,
+      ],
     ];
   }
 
@@ -363,15 +369,9 @@ INSTRUCTIONS;
       }
     }
 
-    // Determine scheduling delay.
-    $sendNow = !empty($settings['send_now']);
-    $delay = $sendNow ? 5 : max(5, (int) ($settings['scheduled_delay_minutes'] ?? 5));
-
-    $sendTime = new \DateTimeImmutable(
-      '+' . $delay . ' minutes',
-      new \DateTimeZone('UTC')
-    );
-    $scheduledSendTime = $sendTime->format('Y-m-d\TH:i:s\Z');
+    // Scheduled time.
+ 
+    $scheduledSendTime = $fields['scheduled_time'] ?? NULL;
 
     // Build options for the API client.
     $options = [
