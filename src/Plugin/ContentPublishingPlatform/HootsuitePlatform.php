@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\iq_content_publishing_hootsuite\Plugin\ContentPublishingPlatform;
 
+use Drupal\Core\Datetime\DrupalDateTime;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Url;
 use Drupal\iq_content_publishing\Attribute\ContentPublishingPlatform;
@@ -196,7 +197,7 @@ INSTRUCTIONS;
     $tools = $this->availableToolsCache;
     foreach ($tools as $cache) {
       if (isset($cache[(string) $toolId])) {
-        $profileName = $cache[(string) $toolId]['name'];
+        $profileName = $cache[(string) $toolId]['type'];
         $networkType = strtoupper($cache[(string) $toolId]['network_type'] ?? '');
         break;
       }
@@ -370,10 +371,12 @@ INSTRUCTIONS;
     }
 
     // Scheduled time.
- 
-    $scheduledSendTime = $fields['scheduled_time'] ?? NULL;
-
-    // Build options for the API client.
+    $scheduledTime = $fields['scheduled_time'] ?? NULL;
+    $scheduledSendTime = $scheduledTime instanceof DrupalDateTime
+      ? $scheduledTime->format('Y-m-d\TH:i:s\Z')
+      : NULL;
+    
+      // Build options for the API client.
     $options = [
       'emailNotification' => FALSE,
     ];
