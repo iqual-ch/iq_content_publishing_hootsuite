@@ -197,7 +197,7 @@ INSTRUCTIONS;
     $tools = $this->availableToolsCache;
     foreach ($tools as $cache) {
       if (isset($cache[(string) $toolId])) {
-        $profileName = $cache[(string) $toolId]['type'];
+        $profileName = $cache[(string) $toolId]['name'];
         $networkType = strtoupper($cache[(string) $toolId]['network_type'] ?? '');
         break;
       }
@@ -213,7 +213,7 @@ INSTRUCTIONS;
     };
 
     return <<<INSTRUCTIONS
-Create a compelling {$profileName} post based on the following Drupal content.
+Create a compelling {$networkType} post based on the following Drupal content.
 
 Guidelines:
 - {$charGuidance}
