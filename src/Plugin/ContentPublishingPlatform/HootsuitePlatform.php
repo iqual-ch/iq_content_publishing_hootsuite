@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace Drupal\iq_content_publishing_hootsuite\Plugin\ContentPublishingPlatform;
 
 use Drupal\Core\Datetime\DrupalDateTime;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\File\FileSystemInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Url;
+use Drupal\file\Entity\File;
+use Drupal\file\FileInterface;
 use Drupal\iq_content_publishing\Attribute\ContentPublishingPlatform;
 use Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformBase;
 use Drupal\iq_content_publishing\Plugin\MultiToolPlatformInterface;
@@ -39,9 +43,26 @@ final class HootsuitePlatform extends ContentPublishingPlatformBase implements M
   protected HootsuiteApiClientInterface $apiClient;
 
   /**
+   * The entity type manager.
+   */
+  protected EntityTypeManagerInterface $entityTypeManager;
+
+  /**
+   * The file system service.
+   */
+  protected FileSystemInterface $fileSystem;
+
+  /**
    * Cached available tools to avoid redundant API calls within a request.
    */
   protected array $availableToolsCache = [];
+
+  /**
+   * Temporary file entities created during publishing (cleaned up after).
+   *
+   * @var \Drupal\file\FileInterface[]
+   */
+  protected array $temporaryFiles = [];
 
   /**
    * {@inheritdoc}
@@ -49,6 +70,8 @@ final class HootsuitePlatform extends ContentPublishingPlatformBase implements M
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition): static {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
     $instance->apiClient = $container->get('iq_hootsuite_api.client');
+    $instance->entityTypeManager = $container->get('entity_type.manager');
+    $instance->fileSystem = $container->get('file_system');
     return $instance;
   }
 
@@ -359,13 +382,18 @@ INSTRUCTIONS;
       );
     }
 
-    // Extract image URLs for media attachments.
-    $mediaUrls = [];
+    // Resolve image data to File entities for media attachments.
+    $mediaFiles = [];
+    $this->temporaryFiles = [];
     $images = $fields['image'] ?? [];
     if (is_array($images)) {
       foreach ($images as $imageData) {
-        if (is_array($imageData) && !empty($imageData['url'])) {
-          $mediaUrls[] = ['url' => $imageData['url']];
+        if (!is_array($imageData)) {
+          continue;
+        }
+        $file = $this->resolveImageFile($imageData);
+        if ($file instanceof FileInterface) {
+          $mediaFiles[] = $file;
         }
       }
     }
@@ -375,11 +403,22 @@ INSTRUCTIONS;
     $scheduledSendTime = $scheduledTime instanceof DrupalDateTime
       ? $scheduledTime->format('Y-m-d\TH:i:s\Z')
       : NULL;
-    
+
       // Build options for the API client.
     $options = [];
-    if (!empty($mediaUrls)) {
-      $options['mediaUrls'] = $mediaUrls;
+    if (!empty($mediaFiles)) {
+      // Media must be uploaded to Hootsuite first to get media IDs.
+      foreach ($mediaFiles as $file) {
+        try {
+          $mediaId = $this->apiClient->uploadImage($file);
+          if ($mediaId !== NULL) {
+            $options['mediaIds'][] = $mediaId;
+          }
+        }
+        catch (\Exception $e) {
+          // Log media upload failure but continue with the post.
+        }
+      }
     }
 
     // Schedule the message to the specific profile via the Hootsuite API.
@@ -413,6 +452,125 @@ INSTRUCTIONS;
         'api_response' => $result,
       ]
     );
+  }
+
+  /**
+   * Resolves image data to a Drupal File entity.
+   *
+   * Tries in order:
+   * 1. Load existing File entity by URI.
+   * 2. If a local URI exists on disk, create a temporary File entity for it.
+   * 3. Download from URL and create a temporary File entity.
+   *
+   * @param array $imageData
+   *   Image data with optional 'uri', 'url', 'filename', and 'alt' keys.
+   *
+   * @return \Drupal\file\FileInterface|null
+   *   A File entity, or NULL if the image cannot be resolved.
+   */
+  protected function resolveImageFile(array $imageData): ?FileInterface {
+    $uri = $imageData['uri'] ?? '';
+    $url = $imageData['url'] ?? '';
+
+    // 1. Try to load an existing File entity by URI.
+    if (!empty($uri)) {
+      $fileStorage = $this->entityTypeManager->getStorage('file');
+      $files = $fileStorage->loadByProperties(['uri' => $uri]);
+      if (!empty($files)) {
+        /** @var \Drupal\file\FileInterface $file */
+        $file = reset($files);
+        return $file;
+      }
+
+      // 2. URI exists and file is on disk — create a temporary File entity.
+      $realPath = $this->fileSystem->realpath($uri);
+      if ($realPath && file_exists($realPath)) {
+        return $this->createTemporaryFileEntity($uri, $imageData);
+      }
+    }
+
+    // 3. Download from URL and save as a temporary file.
+    if (!empty($url)) {
+      return $this->downloadAndCreateFile($url, $imageData);
+    }
+
+    return NULL;
+  }
+
+  /**
+   * Creates a temporary File entity for an existing file on disk.
+   *
+   * @param string $uri
+   *   The file URI (e.g. public://image.jpg).
+   * @param array $imageData
+   *   The image data array.
+   *
+   * @return \Drupal\file\FileInterface|null
+   *   The created File entity, or NULL on failure.
+   */
+  protected function createTemporaryFileEntity(string $uri, array $imageData): ?FileInterface {
+    try {
+      $fileStorage = $this->entityTypeManager->getStorage('file');
+      /** @var \Drupal\file\FileInterface $file */
+      $file = $fileStorage->create([
+        'uri' => $uri,
+        'filename' => $imageData['filename'] ?? basename($uri),
+        'status' => 0,
+      ]);
+      $file->save();
+      $this->temporaryFiles[] = $file;
+      return $file;
+    }
+    catch (\Exception) {
+      return NULL;
+    }
+  }
+
+  /**
+   * Downloads an image from a URL and creates a temporary File entity.
+   *
+   * @param string $url
+   *   The image URL.
+   * @param array $imageData
+   *   The image data array.
+   *
+   * @return \Drupal\file\FileInterface|null
+   *   The created File entity, or NULL on failure.
+   */
+  protected function downloadAndCreateFile(string $url, array $imageData): ?FileInterface {
+    try {
+      $response = $this->httpClient->request('GET', $url, [
+        'timeout' => 30,
+      ]);
+
+      if ($response->getStatusCode() !== 200) {
+        return NULL;
+      }
+
+      $body = (string) $response->getBody();
+      if (empty($body)) {
+        return NULL;
+      }
+
+      // Determine filename.
+      $filename = $imageData['filename'] ?? '';
+      if (empty($filename)) {
+        $path = parse_url($url, PHP_URL_PATH) ?: 'image.jpg';
+        $filename = basename($path);
+      }
+
+      // Save to temporary directory.
+      $destination = 'temporary://hootsuite_' . $filename;
+      $uri = $this->fileSystem->saveData($body, $destination, FileSystemInterface::EXISTS_RENAME);
+      if (!$uri) {
+        return NULL;
+      }
+
+      return $this->createTemporaryFileEntity($uri, ['filename' => $filename] + $imageData);
+    }
+    catch (\Exception) {
+      return NULL;
+    }
   }
 
 }
